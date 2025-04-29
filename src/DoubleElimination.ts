@@ -1,300 +1,334 @@
 import { Match } from './Match.js';
 import { shuffle } from './Shuffle.js';
 
-export function DoubleElimination(players: number | string[], startingRound: number = 1, ordered: boolean = false) : Match[] {
-    const matches = [];
-    let playerArray = [];
-    if (Array.isArray(players)) {
-        playerArray = ordered ? players : shuffle(players);
-    } else {
-        playerArray = [...new Array(players)].map((_, i) => i + 1);
+export function DoubleElimination(
+  players,
+  startingRound = 1,
+  ordered = false
+) {
+  const matches = [];
+
+  // 1) Build player array
+  let playerArray;
+  if (Array.isArray(players)) {
+    playerArray = ordered ? [...players] : shuffle([...players]);
+  } else {
+    playerArray = Array.from({ length: players }, (_, i) => i + 1);
+  }
+
+  const N = playerArray.length;
+  const exponent = Math.log2(N);
+  const floorExp = Math.floor(exponent);
+  const ceilExp = Math.ceil(exponent);
+  // remainder = number of “byes”
+  const remainder = N - 2 ** floorExp;
+
+  // 2) Build seeding bracket
+  const bracket = [1, 4, 2, 3];
+  for (let i = 3; i <= floorExp; i++) {
+    for (let j = 0; j < bracket.length; j += 2) {
+      bracket.splice(j + 1, 0, 2 ** i + 1 - bracket[j]);
     }
-    const exponent = Math.log2(playerArray.length);
-    const remainder = Math.round(2 ** exponent) % (2 ** Math.floor(exponent));
-    const bracket = [1, 4, 2, 3];
-    for (let i = 3; i <= Math.floor(exponent); i++) {
-        for (let j = 0; j < bracket.length; j += 2) {
-            bracket.splice(j + 1, 0, 2 ** i + 1 - bracket[j]);
-        }
+  }
+
+  // 3) Helper: turn a seed index into a player or null
+  const seed = idx =>
+    idx >= 1 && idx <= N ? playerArray[idx - 1] : null;
+
+  let round = startingRound;
+
+  // 4) Initial “bye” round if needed
+  if (remainder !== 0) {
+    for (let i = 0; i < remainder; i++) {
+      matches.push({ round, match: i + 1, player1: null, player2: null });
     }
-    let round = startingRound;
-    if (remainder !== 0) {
-        for (let i = 0; i < remainder; i++) {
-            matches.push({
-                round: round,
-                match: i + 1,
-                player1: null,
-                player2: null
-            });
-        }
-        round++;
-    }
-    let matchExponent = Math.floor(exponent) - 1;
-    let iterated = false;
-    do {
-        for (let i = 0; i < 2 ** matchExponent; i++) {
-            matches.push({
-                round: round,
-                match: i + 1,
-                player1: null,
-                player2: null
-            });
-        }
-        if (!iterated) {
-            iterated = true;
-        } else {
-            matches.filter(m => m.round === round - 1).forEach(m => m.win = {
-                round: round,
-                match: Math.ceil(m.match / 2)
-            });
-        }
-        round++;
-        matchExponent--;
-    } while (round < startingRound + Math.ceil(exponent));
-    const startRound = startingRound + (remainder === 0 ? 0 : 1);
-    matches.filter(m => m.round === startRound).forEach((m, i) => {
-        m.player1 = playerArray[bracket[2 * i] - 1];
-        m.player2 = playerArray[bracket[2 * i + 1] - 1];
-    });
-    if (remainder !== 0) {
-        const initialRound = matches.filter(m => m.round === startingRound);
-        let counter = 0;
-        matches.filter(m => m.round === startingRound + 1).forEach((m, i) => {
-            const [index1, index2] = [playerArray.indexOf(m.player1), playerArray.indexOf(m.player2)];
-            if (index1 >= Math.pow(2, Math.floor(exponent)) - remainder) {
-                const initialMatch = initialRound[counter];
-                initialMatch.player1 = m.player1;
-                initialMatch.player2 = playerArray[Math.pow(2, Math.ceil(exponent)) - index1 - 1];
-                initialMatch.win = {
-                    round: startingRound + 1,
-                    match: m.match
-                }
-                m.player1 = null;
-                counter++;
-            }
-            if (index2 >= Math.pow(2, Math.floor(exponent)) - remainder) {
-                const initialMatch = initialRound[counter];
-                initialMatch.player1 = m.player2;
-                initialMatch.player2 = playerArray[Math.pow(2, Math.ceil(exponent)) - index2 - 1];
-                initialMatch.win = {
-                    round: startingRound + 1,
-                    match: m.match
-                }
-                m.player2 = null;
-                counter++;
-            }
-        });
-    }
-    matches.push({
-        round: round,
-        match: 1,
-        player1: null,
-        player2: null,
-    });
-    matches.find(m => m.round === round - 1).win = {
-        round: round,
-        match: 1
-    };
     round++;
-    const roundDiff = round - 1;
-    if (remainder !== 0) {
-        if (remainder <= 2 ** Math.floor(exponent) / 2) {
-            for (let i = 0; i < remainder; i++) {
-                matches.push({
-                    round: round,
-                    match: i + 1,
-                    player1: null,
-                    player2: null
-                });
-            }
-            round++;
-        } else {
-            for (let i = 0; i < remainder - 2 ** (Math.floor(exponent) - 1); i++) {
-                matches.push({
-                    round: round,
-                    match: i + 1,
-                    player1: null,
-                    player2: null
-                });
-            }
-            round++;
-            for (let i = 0; i < 2 ** (Math.floor(exponent) - 1); i++) {
-                matches.push({
-                    round: round,
-                    match: i + 1,
-                    player1: null,
-                    player2: null
-                });
-            }
-            round++;
-        }
+  }
+
+  // 5) Winners bracket skeleton + win-pointers
+  let matchExp = floorExp - 1;
+  let iterated = false;
+  do {
+    for (let i = 0; i < 2 ** matchExp; i++) {
+      matches.push({ round, match: i + 1, player1: null, player2: null });
     }
-    let loserExponent = Math.floor(exponent) - 2;
-    do {
-        for (let i = 0; i < 2; i++) {
-            for (let j = 0; j < 2 ** loserExponent; j++) {
-                matches.push({
-                    round: round,
-                    match: j + 1,
-                    player1: null,
-                    player2: null
-                });
-            }
-            round++;
-        }
-        loserExponent--;
-    } while (loserExponent > -1);
-    const fillPattern = (matchCount, fillCount) => {
-        const a = [...new Array(matchCount)].map((_, i) => i + 1);
-        const c = fillCount % 4;
-        const x = a.slice(0, a.length / 2);
-        const y = a.slice(a.length / 2);
-        return c === 0 ? a : c === 1 ? a.reverse() : c === 2 ? x.reverse().concat(y.reverse()) : y.concat(x);
-    }
-    let fillCount = 0;
-    let winRound = startingRound;
-    let loseRound = roundDiff + 1;
-    if (remainder === 0) {
-        const winMatches = matches.filter(m => m.round === winRound);
-        const fill = fillPattern(winMatches.length, fillCount);
-        fillCount++;
-        let counter = 0;
-        matches.filter(m => m.round === loseRound).forEach(m => {
-            for (let i = 0; i < 2; i++) {
-                const match = winMatches.find(m => m.match === fill[counter]);
-                match.loss = {
-                    round: m.round,
-                    match: m.match
-                }
-                counter++;
-            }
-        });
-        winRound++;
-        loseRound++;
-    } else if (remainder <= 2 ** Math.floor(exponent) / 2) {
-        let winMatches = matches.filter(m => m.round === winRound);
-        let fill = fillPattern(winMatches.length, fillCount);
-        fillCount++;
-        matches.filter(m => m.round === loseRound).forEach((m, i) => {
-            const match = winMatches.find(m => m.match === fill[i]);
-            match.loss = {
-                round: m.round,
-                match: m.match
-            };
-        });
-        winRound++;
-        loseRound++;
-        winMatches = matches.filter(m => m.round === winRound);
-        fill = fillPattern(winMatches.length, fillCount);
-        fillCount++;
-        let countA = 0;
-        let countB = 0;
-        let routeNumbers = matches.filter(m => m.round === 2 && (m.player1 === null || m.player2 === null)).map(m => Math.ceil(m.match / 2));
-        let routeCopy = [...routeNumbers];
-        matches.filter(m => m.round === loseRound).forEach(m => {
-            for (let i = 0; i < 2; i++) {
-                const match = winMatches.find(m => m.match === fill[countA]);
-                if (routeCopy.some(n => n === m.match)) {
-                    const lossMatch = matches.filter(x => x.round === loseRound - 1)[countB];
-                    countB++;
-                    match.loss = {
-                        round: lossMatch.round,
-                        match: lossMatch.match
-                    };
-                    routeCopy.splice(routeCopy.indexOf(m.match), 1);
-                } else {
-                    match.loss = {
-                        round: m.round,
-                        match: m.match
-                    };
-                }
-                countA++;
-            }
-        });
-        winRound++;
-        loseRound++;
-        matches.filter(m => m.round === roundDiff + 1).forEach((m, i) => {
-            const match = matches.find(x => x.round === m.round + 1 && x.match === routeNumbers[i]);
-            m.win = {
-                round: match.round,
-                match: match.match
-            };
+    if (iterated) {
+      matches
+        .filter(m => m.round === round - 1)
+        .forEach(m => {
+          m.win = { round: round, match: Math.ceil(m.match / 2) };
         });
     } else {
-        const winMatches = matches.filter(m => m.round === winRound);
-        const loseMatchesA = matches.filter(m => m.round === loseRound);
-        loseRound++;
-        const loseMatchesB = matches.filter(m => m.round === loseRound);
-        const fill = fillPattern(winMatches.length, fillCount);
-        fillCount++;
-        let countA = 0;
-        let countB = 0;
-        let routeNumbers = matches.filter(m => m.round === 2 && m.player1 === null && m.player2 === null).map(m => m.match);
-        loseMatchesB.forEach(m => {
-            const winMatchA = winMatches.find(x => x.match === fill[countA]);
-            if (routeNumbers.some(n => n === m.match)) {
-                const lossMatch = loseMatchesA[countB];
-                winMatchA.loss = {
-                    round: lossMatch.round,
-                    match: lossMatch.match
-                };
-                countA++;
-                countB++;
-                const winMatchB = winMatches.find(x => x.match === fill[countA]);
-                winMatchB.loss = {
-                    round: lossMatch.round,
-                    match: lossMatch.match
-                };
-            } else {
-                winMatchA.loss = {
-                    round: m.round,
-                    match: m.match
-                }
-            }
-            countA++;
-        });
-        winRound++;
-        matches.filter(m => m.round === roundDiff + 1).forEach((m, i) => {
-            const match = matches.find(x => x.round === m.round + 1 && x.match === routeNumbers[i]);
-            m.win = {
-                round: match.round,
-                match: match.match
-            };
-        });
+      iterated = true;
     }
-    let ffwd = 0;
-    for (let i = winRound; i < roundDiff; i++) {
-        let loseMatchesA = matches.filter(m => m.round === loseRound - winRound + ffwd + i);
-        const lostMatchesB = matches.filter(m => m.round === loseRound - winRound + ffwd + i + 1);
-        if (loseMatchesA.length === lostMatchesB.length) {
-            loseMatchesA = lostMatchesB;
-            ffwd++;
+    round++;
+    matchExp--;
+  } while (round < startingRound + ceilExp);
+
+  // 6) Seed the main‐bracket
+  const startRound = startingRound + (remainder === 0 ? 0 : 1);
+  matches
+    .filter(m => m.round === startRound)
+    .forEach((m, i) => {
+      m.player1 = seed(bracket[2 * i]);
+      m.player2 = seed(bracket[2 * i + 1]);
+    });
+
+  // 7) Feed byes into those initial matches
+  if (remainder !== 0) {
+    const initial = matches.filter(m => m.round === startingRound);
+    let ctr = 0;
+    matches
+      .filter(m => m.round === startingRound + 1)
+      .forEach(m => {
+        const idx1 = playerArray.indexOf(m.player1);
+        const idx2 = playerArray.indexOf(m.player2);
+
+        if (idx1 >= 2 ** floorExp - remainder) {
+          const im = initial[ctr++];
+          im.player1 = m.player1;
+          im.player2 = seed(2 ** ceilExp - idx1);
+          im.win = { round: startingRound + 1, match: m.match };
+          m.player1 = null;
         }
-        const winMatches = matches.filter(m => m.round === i);
-        const fill = fillPattern(winMatches.length, fillCount);
-        fillCount++;
-        loseMatchesA.forEach((m, j) => {
-            const match = winMatches.find(m => m.match === fill[j]);
-            match.loss = {
-                round: m.round,
-                match: m.match
-            };
-        });
+        if (idx2 >= 2 ** floorExp - remainder) {
+          const im = initial[ctr++];
+          im.player1 = m.player2;
+          im.player2 = seed(2 ** ceilExp - idx2);
+          im.win = { round: startingRound + 1, match: m.match };
+          m.player2 = null;
+        }
+      });
+  }
+
+  // 8) Winners-bracket final
+  matches.push({ round, match: 1, player1: null, player2: null });
+  const prevFinal = matches.find(m => m.round === round - 1);
+  if (prevFinal) {
+    prevFinal.win = { round, match: 1 };
+  }
+  round++;
+  const roundDiff = round - 1;
+
+  // 9) Losers bracket “prefill” if there were byes
+  if (remainder !== 0) {
+    // small‐remainder case
+    if (remainder <= 2 ** (floorExp - 1)) {
+      for (let i = 0; i < remainder; i++) {
+        matches.push({ round, match: i + 1, player1: null, player2: null });
+      }
+      round++;
+    } else {
+      // large‐remainder case
+      for (let i = 0; i < remainder - 2 ** (floorExp - 1); i++) {
+        matches.push({ round, match: i + 1, player1: null, player2: null });
+      }
+      round++;
+      for (let i = 0; i < 2 ** (floorExp - 1); i++) {
+        matches.push({ round, match: i + 1, player1: null, player2: null });
+      }
+      round++;
     }
-    for (let i = remainder === 0 ? roundDiff + 1 : roundDiff + 2; i < matches.reduce((max, curr) => Math.max(max, curr.round), 0); i++) {
-        const loseMatchesA = matches.filter(m => m.round === i);
-        const loseMatchesB = matches.filter(m => m.round === i + 1);
-        loseMatchesA.forEach((m, j) => {
-            const match = loseMatchesA.length === loseMatchesB.length ? loseMatchesB[j] : loseMatchesB[Math.floor(j / 2)];
-            m.win = {
-                round: match.round,
-                match: match.match
-            };
-        });
+  }
+
+  // 10) Build the rest of the losers‐bracket structure
+  let loserExp = floorExp - 2;
+  do {
+    for (let side = 0; side < 2; side++) {
+      for (let j = 0; j < 2 ** loserExp; j++) {
+        matches.push({ round, match: j + 1, player1: null, player2: null });
+      }
+      round++;
     }
-    matches.filter(m => m.round === matches.reduce((max, curr) => Math.max(max, curr.round), 0))[0].win = {
-        round: roundDiff,
-        match: 1
-    };
-    return matches;
+    loserExp--;
+  } while (loserExp > -1);
+
+  // 11) Routing helper for linking win/loss pointers
+  const fillPattern = (count, fc) => {
+    const arr = Array.from({ length: count }, (_, i) => i + 1);
+    const c = fc % 4;
+    const half = count / 2;
+    const first = arr.slice(0, half);
+    const second = arr.slice(half);
+    if (c === 0) return arr;
+    if (c === 1) return arr.reverse();
+    if (c === 2) return first.reverse().concat(second.reverse());
+    return second.concat(first);
+  };
+
+  // 12) Cross‐link winners & losers
+  let fillCount = 0;
+  let winRound = startingRound;
+  let loseRound = roundDiff + 1;
+
+  // perfect power‐of‐2
+  if (remainder === 0) {
+    let wb = matches.filter(m => m.round === winRound);
+    const fp = fillPattern(wb.length, fillCount++);
+    matches
+      .filter(m => m.round === loseRound)
+      .forEach(lm => {
+        for (let i = 0; i < 2; i++) {
+          const tgt = wb.find(wm => wm.match === fp.shift());
+          if (tgt) tgt.loss = { round: lm.round, match: lm.match };
+        }
+      });
+    winRound++;
+    loseRound++;
+  }
+  // small‐remainder case
+  else if (remainder <= 2 ** (floorExp - 1)) {
+    let wb = matches.filter(m => m.round === winRound);
+    let fp = fillPattern(wb.length, fillCount++);
+    matches
+      .filter(m => m.round === loseRound)
+      .forEach((lm, i) => {
+        const tgt = wb.find(wm => wm.match === fp[i]);
+        if (tgt) tgt.loss = { round: lm.round, match: lm.match };
+      });
+    winRound++;
+    loseRound++;
+
+    wb = matches.filter(m => m.round === winRound);
+    fp = fillPattern(wb.length, fillCount++);
+    // find byes in round-2
+    const byeRoutes = new Set(
+      matches
+        .filter(
+          m =>
+            m.round === startingRound + 1 &&
+            (m.player1 === null || m.player2 === null)
+        )
+        .map(m => Math.ceil(m.match / 2))
+    );
+    let alt = 0;
+    matches
+      .filter(m => m.round === loseRound)
+      .forEach(lm => {
+        for (let i = 0; i < 2; i++) {
+          const tgt = wb.find(wm => wm.match === fp.shift());
+          if (tgt) {
+            if (byeRoutes.has(lm.match)) {
+              const prevLM = matches.filter(x => x.round === loseRound - 1)[alt++];
+              tgt.loss = {
+                round: prevLM.round,
+                match: prevLM.match
+              };
+              byeRoutes.delete(lm.match);
+            } else {
+              tgt.loss = { round: lm.round, match: lm.match };
+            }
+          }
+        }
+      });
+    winRound++;
+    loseRound++;
+
+    // link back into winners
+    const roundTwoRoutes = Array.from(
+      matches
+        .filter(
+          m =>
+            m.round === startingRound + 1 &&
+            (m.player1 === null || m.player2 === null)
+        )
+        .map(m => Math.ceil(m.match / 2))
+    );
+    matches
+      .filter(m => m.round === roundDiff + 1)
+      .forEach((m, i) => {
+        const nm = matches.find(
+          x => x.round === m.round + 1 && x.match === roundTwoRoutes[i]
+        );
+        if (nm) m.win = { round: nm.round, match: nm.match };
+      });
+  }
+  // large‐remainder case
+  else {
+    const wb = matches.filter(m => m.round === winRound);
+    const lbA = matches.filter(m => m.round === loseRound);
+    loseRound++;
+    const lbB = matches.filter(m => m.round === loseRound);
+
+    const fp = fillPattern(wb.length, fillCount++);
+    const byeRoutes = new Set(
+      matches
+        .filter(
+          m =>
+            m.round === startingRound + 1 &&
+            m.player1 === null &&
+            m.player2 === null
+        )
+        .map(m => m.match)
+    );
+
+    let aI = 0,
+      bI = 0;
+    lbB.forEach(lb => {
+      const wA = wb.find(wm => wm.match === fp[aI++]);
+      if (!wA) return;
+      if (byeRoutes.has(lb.match)) {
+        const lossM = lbA[bI++];
+        wA.loss = { round: lossM.round, match: lossM.match };
+        const wB = wb.find(wm => wm.match === fp[aI++]);
+        if (wB) wB.loss = { round: lossM.round, match: lossM.match };
+      } else {
+        wA.loss = { round: lb.round, match: lb.match };
+      }
+    });
+    winRound++;
+
+    const br = Array.from(byeRoutes);
+    matches
+      .filter(m => m.round === roundDiff + 1)
+      .forEach((m, i) => {
+        const nm = matches.find(x => x.round === m.round + 1 && x.match === br[i]);
+        if (nm) m.win = { round: nm.round, match: nm.match };
+      });
+  }
+
+  // 13) Finish cross‐links
+  let ff = 0;
+  for (let r = winRound; r < roundDiff; r++) {
+    let lA = matches.filter(
+      m => m.round === loseRound - winRound + ff + r
+    );
+    const lB = matches.filter(
+      m => m.round === loseRound - winRound + ff + r + 1
+    );
+    if (lA.length === lB.length) {
+      lA = lB;
+      ff++;
+    }
+    const wM = matches.filter(m => m.round === r);
+    const fp = fillPattern(wM.length, fillCount++);
+    lA.forEach((lm, j) => {
+      const tgt = wM.find(wm => wm.match === fp[j]);
+      if (tgt) tgt.loss = { round: lm.round, match: lm.match };
+    });
+  }
+
+  // 14) Final pointers
+  const maxR = matches.reduce((mx, m) => Math.max(mx, m.round), 0);
+  for (
+    let r = remainder === 0 ? roundDiff + 1 : roundDiff + 2;
+    r < maxR;
+    r++
+  ) {
+    const lA = matches.filter(m => m.round === r);
+    const lB = matches.filter(m => m.round === r + 1);
+    lA.forEach((lm, j) => {
+      const nm =
+        lA.length === lB.length ? lB[j] : lB[Math.floor(j / 2)];
+      if (nm) lm.win = { round: nm.round, match: nm.match };
+    });
+  }
+
+  // 15) Championship linkage
+  const finalM = matches.find(m => m.round === maxR);
+  if (finalM) {
+    finalM.win = { round: roundDiff, match: 1 };
+  }
+
+  return matches;
 }
